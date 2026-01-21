@@ -22,7 +22,7 @@
 </head>
 <body>
 
-<div id="intro-screen" onclick="handleIntroClick()">
+<div id="intro-screen" onmousedown="handleIntroClick()" ontouchstart="handleIntroClick(event)">
     <canvas id="introCanvas" style="position:absolute; top:0; left:0; width:100%; height:100%; opacity:0.15; z-index:201;"></canvas>
     <div id="click-to-start">[ TAP TO INITIALIZE SYSTEM ]</div>
     <div id="intro-text">
@@ -38,7 +38,7 @@
         - Enter the shrine to restore your HP.<br>
         <span style="color:#ff0000;">- Complete 3 levels to purify.</span>
     </p>
-    <button onclick="startGame()" style="padding:12px 40px; cursor:pointer; background:#111; color:#ff0000; border:1px solid #ff0000; font-weight: bold;">[ START INVESTIGATION ]</button>
+    <button onmousedown="startGame()" ontouchstart="startGame()" style="padding:12px 40px; cursor:pointer; background:#111; color:#ff0000; border:1px solid #ff0000; font-weight: bold;">[ START INVESTIGATION ]</button>
 </div>
 
 <div id="container">
@@ -55,13 +55,24 @@
 <script>
     const canvas = document.getElementById('gameCanvas'), ctx = canvas.getContext('2d');
     const introCanvas = document.getElementById('introCanvas'), ictx = introCanvas.getContext('2d'), knob = document.getElementById('stick-knob');
-    let audioCtx = null, bgmNode = null, bgmGain = null, introBGM = null, p, currentMap, state = "intro", frame = 0, enemies = [], rollY = 420, resetTimer = 0, currentLevel = 1, treasures = [], noiseTimer = 0, animationId = null, audioStarted = false, whiteOutRadius = 0;
+    let audioCtx = null, bgmNode = null, bgmGain = null, introBGM = null, p, currentMap, state = "intro", frame = 0, enemies = [], rollY = 420, resetTimer = 0, currentLevel = 1, treasures = [], noiseTimer = 0, animationId = null, audioStarted = false, whiteOutRadius = 0, lastIntroActionTime = 0;
     const keys = {}; let stick = { active: false, x: 0, y: 0, startX: 0, startY: 0, tapped: false };
     const levels = [{ name: "LEVEL 1: GREEN DEPTHS", color: "#080808", mapColor: "#050a05", enemyCount: 2, enemyTypes: [0] }, { name: "LEVEL 2: BLOOD LAB", color: "#1a0505", mapColor: "#220808", enemyCount: 3, enemyTypes: [0, 1] }, { name: "LEVEL 3: CYAN ABYSS", color: "#050a1a", mapColor: "#081a22", enemyCount: 4, enemyTypes: [0, 1, 2] }];
     let introNematodes = Array.from({length: 8}, () => ({ x: Math.random() * 400, y: Math.random() * 400, segs: Array.from({length: 20}, () => ({x:0, y:0})), angle: Math.random() * Math.PI * 2 }));
     
-    function handleIntroClick() {
-        if (!audioStarted) { audioStarted = true; document.getElementById('click-to-start').style.display = 'none'; document.getElementById('intro-text').style.display = 'block'; startIntroAudio(); } else { skipIntro(); }
+    function handleIntroClick(e) {
+        if (e) { e.preventDefault(); e.stopPropagation(); }
+        const now = Date.now();
+        if (!audioStarted) { 
+            audioStarted = true; 
+            lastIntroActionTime = now; 
+            document.getElementById('click-to-start').style.display = 'none'; 
+            document.getElementById('intro-text').style.display = 'block'; 
+            startIntroAudio(); 
+        } else { 
+            // 誤タップ防止：初期化タップから500ms以内はスキップ不可
+            if (now - lastIntroActionTime > 500) skipIntro(); 
+        }
     }
 
     function startIntroAudio() {
@@ -83,15 +94,12 @@
     }
 
     function stopIntroAudio() { if (introBGM) { introBGM.mainG.gain.setTargetAtTime(0, audioCtx.currentTime, 0.8); setTimeout(() => { if(introBGM) {introBGM.o.stop(); introBGM.lfo.stop(); introBGM = null;} }, 1200); } }
-    
     function skipIntro() { if (state !== "intro" || !audioStarted) return; state = "title"; stopIntroAudio(); document.getElementById('intro-screen').style.display = 'none'; document.getElementById('start-screen').style.display = 'block'; }
-
     function updateLogoBlink() { if (state !== "title") return; if (Math.random() < 0.02) { const chars = document.querySelectorAll('.logo-char'), target = chars[Math.floor(Math.random() * chars.length)]; target.classList.add('blink-off'); setTimeout(() => target.classList.remove('blink-off'), 50 + Math.random() * 100); } }
     function safeStopBGM() { if (bgmGain) { try { bgmGain.gain.cancelScheduledValues(0); bgmGain.gain.setTargetAtTime(0, audioCtx.currentTime, 0.03); } catch(e) {} } }
     function initGameVars() { p = { x: 200, y: 250, speed: 4, hp: 2, maxHp: 2, hasT: false, saved: 0, invul: 0 }; currentMap = 0; currentLevel = 1; frame = 0; enemies = []; rollY = 420; resetTimer = 0; noiseTimer = 0; whiteOutRadius = 0; spawnTreasures(); updateUI(); if ('ontouchstart' in window) document.getElementById('stick-base').style.display = 'block'; state = "play"; }
     function spawnTreasures() { treasures = [null, null]; for (let i = 2; i <= 4; i++) treasures.push({ x: 50 + Math.random() * 300, y: 50 + Math.random() * 300, active: true }); }
     function initAudio() { if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)(); if (audioCtx.state === 'suspended') audioCtx.resume(); }
-    
     function playDepositSound() { if (!audioCtx) return; const now = audioCtx.currentTime, o = audioCtx.createOscillator(), g = audioCtx.createGain(); o.type = 'sine'; o.frequency.setValueAtTime(60, now); o.frequency.exponentialRampToValueAtTime(40, now + 0.8); g.gain.setValueAtTime(0.2, now); g.gain.linearRampToValueAtTime(0, now + 0.8); o.connect(g); g.connect(audioCtx.destination); o.start(); o.stop(now + 0.8); }
     function playLevelUpSound() { if (!audioCtx) return; const now = audioCtx.currentTime, duration = 1.5; [40, 42, 55].forEach((freq, i) => { const o = audioCtx.createOscillator(), g = audioCtx.createGain(); o.type = i === 2 ? 'sawtooth' : 'sine'; o.frequency.setValueAtTime(freq, now); const lfo = audioCtx.createOscillator(), lfoGain = audioCtx.createGain(); lfo.frequency.value = 15; lfoGain.gain.value = 5; lfo.connect(lfoGain); lfoGain.connect(o.frequency); lfo.start(now); g.gain.setValueAtTime(0, now); g.gain.linearRampToValueAtTime(0.15, now + 0.2); g.gain.linearRampToValueAtTime(0, now + duration); o.connect(g); g.connect(audioCtx.destination); o.start(now); o.stop(now + duration); lfo.stop(now + duration); }); }
     function playDamageNoise() { if (!audioCtx) return; const bufferSize = audioCtx.sampleRate * 0.15, buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate), data = buffer.getChannelData(0); for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1; const noise = audioCtx.createBufferSource(); noise.buffer = buffer; const g = audioCtx.createGain(); g.gain.setValueAtTime(0.1, audioCtx.currentTime); g.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.15); noise.connect(g); g.connect(audioCtx.destination); noise.start(); }
@@ -100,9 +108,9 @@
     
     class Nematode { constructor(x, y, type) { this.x = x; this.y = y; this.type = type; this.color = ["#00ff66", "#ff3333", "#00ccff"][type]; this.segs = Array.from({length: 10}, () => ({x, y})); this.phase = Math.random() * 10; } update(tx, ty) { let speed = 0.02 + (currentLevel * 0.012); if (this.type === 1) speed *= (Math.sin(frame * 0.05) > 0.5) ? 3 : 0.5; if (this.type === 2) { speed *= 1.5; tx += Math.sin(frame * 0.1) * 30; } this.x += (tx - this.x) * speed; this.y += (ty - this.y) * speed; this.phase += 0.2; let head = { x: this.x + Math.sin(this.phase)*6, y: this.y + Math.cos(this.phase)*6 }; for(let i=0; i<this.segs.length; i++) { let target = i === 0 ? head : this.segs[i-1]; this.segs[i].x += (target.x - this.segs[i].x) * 0.35; this.segs[i].y += (target.y - this.segs[i].y) * 0.35; } } draw(targetCtx = ctx) { this.segs.forEach((s, i) => { targetCtx.fillStyle = i === 0 ? "#fff" : this.color; targetCtx.beginPath(); targetCtx.arc(s.x, s.y, 5 - i*0.4, 0, Math.PI*2); targetCtx.fill(); }); } }
     
-    function handleInput(e) { if (state === "intro") { handleIntroClick(); return; } if (e.type === 'touchstart') { const rect = canvas.getBoundingClientRect(), touch = e.touches[0], tx = touch.clientX - rect.left, ty = touch.clientY - rect.top; if (state !== "play") { stick.tapped = true; } else if (tx < 200 && ty > 200) { stick.active = true; stick.startX = touch.clientX; stick.startY = touch.clientY; } else { stick.tapped = true; } } else if (e.type === 'touchmove' && stick.active) { const touch = e.touches[0], dx = touch.clientX - stick.startX, dy = touch.clientY - stick.startY, dist = Math.min(40, Math.hypot(dx, dy)), angle = Math.atan2(dy, dx); stick.x = (Math.cos(angle) * dist) / 40; stick.y = (Math.sin(angle) * dist) / 40; knob.style.transform = `translate(${stick.x * 40}px, ${stick.y * 40}px)`; e.preventDefault(); } else if (e.type === 'touchend') { stick.active = false; stick.x = 0; stick.y = 0; knob.style.transform = `translate(0, 0)`; } }
+    function handleGlobalInput(e) { if (state === "intro") return; if (e.type === 'touchstart') { const rect = canvas.getBoundingClientRect(), touch = e.touches[0], tx = touch.clientX - rect.left, ty = touch.clientY - rect.top; if (state !== "play") { stick.tapped = true; } else if (tx < 200 && ty > 200) { stick.active = true; stick.startX = touch.clientX; stick.startY = touch.clientY; } else { stick.tapped = true; } } else if (e.type === 'touchmove' && stick.active) { const touch = e.touches[0], dx = touch.clientX - stick.startX, dy = touch.clientY - stick.startY, dist = Math.min(40, Math.hypot(dx, dy)), angle = Math.atan2(dy, dx); stick.x = (Math.cos(angle) * dist) / 40; stick.y = (Math.sin(angle) * dist) / 40; knob.style.transform = `translate(${stick.x * 40}px, ${stick.y * 40}px)`; e.preventDefault(); } else if (e.type === 'touchend') { stick.active = false; stick.x = 0; stick.y = 0; knob.style.transform = `translate(0, 0)`; } }
     
-    window.addEventListener('touchstart', handleInput, {passive: false}); window.addEventListener('touchmove', handleInput, {passive: false}); window.addEventListener('touchend', handleInput);
+    window.addEventListener('touchstart', handleGlobalInput, {passive: false}); window.addEventListener('touchmove', handleGlobalInput, {passive: false}); window.addEventListener('touchend', handleGlobalInput);
     window.onkeydown = e => { keys[e.code] = true; if (state === "intro") { handleIntroClick(); } else if (state === "title" && (e.code === "Enter" || e.code === "Space")) { startGame(); } }; window.onkeyup = e => keys[e.code] = false;
     
     function startGame() { initAudio(); document.getElementById('start-screen').style.display = 'none'; initGameVars(); updateBGM(); if(!animationId) gameLoop(); }
@@ -112,14 +120,8 @@
         if (state !== "play") { 
             if (state === "title") updateLogoBlink(); 
             resetTimer++; 
-            if (state === "ending") {
-                if (resetTimer > 400 || (resetTimer > 60 && (keys['Space'] || keys['Enter'] || stick.tapped))) {
-                    whiteOutRadius += 10;
-                    if (whiteOutRadius > 500) { stick.tapped = false; state = "title"; document.getElementById('start-screen').style.display = 'block'; }
-                }
-            } else if (resetTimer > 60 && (keys['Space'] || keys['Enter'] || stick.tapped)) { 
-                stick.tapped = false; state = "title"; document.getElementById('start-screen').style.display = 'block'; 
-            }
+            if (state === "ending") { if (resetTimer > 400 || (resetTimer > 60 && (keys['Space'] || keys['Enter'] || stick.tapped))) { whiteOutRadius += 10; if (whiteOutRadius > 500) { stick.tapped = false; state = "title"; document.getElementById('start-screen').style.display = 'block'; } }
+            } else if (resetTimer > 60 && (keys['Space'] || keys['Enter'] || stick.tapped)) { stick.tapped = false; state = "title"; document.getElementById('start-screen').style.display = 'block'; }
             return; 
         } 
         if (noiseTimer > 0) { noiseTimer--; return; }
@@ -131,14 +133,8 @@
         else if (currentMap === 3) { if (p.x > 400) { currentMap = 0; p.x = 20; } else { p.x = Math.max(10, p.x); p.y = Math.max(10, Math.min(390, p.y)); } }
         else if (currentMap === 4) { if (p.y < 0) { currentMap = 0; p.y = 380; } else { p.y = Math.min(390, p.y); p.x = Math.max(10, Math.min(390, p.x)); } }
         if (oldMap !== currentMap) { if (currentMap === 1) { p.hp = p.maxHp; playFomilyBell(false); } enemies = []; updateBGM(); updateUI(); }
-        if (currentMap !== 1) {
-            const config = levels[currentLevel-1];
-            if (Math.random() < 0.03 && enemies.length < config.enemyCount) { const type = config.enemyTypes[Math.floor(Math.random() * config.enemyTypes.length)]; enemies.push(new Nematode(Math.random()*400, -20, type)); }
-            for(let i = enemies.length - 1; i >= 0; i--) { enemies[i].update(p.x, p.y); if (p.invul === 0 && Math.hypot(p.x - enemies[i].x, p.y - enemies[i].y) < 15) { p.hp--; p.invul = 60; playDamageNoise(); updateUI(); if (p.hp <= 0) { state = "dead"; resetTimer = 0; safeStopBGM(); return; } } }
-        } else if (p.hasT && Math.hypot(p.x - 200, p.y - 60) < 40) {
-            p.saved++; p.hasT = false; playDepositSound(); updateUI();
-            if (p.saved >= 3) { if (currentLevel < 3) { currentLevel++; p.saved = 0; spawnTreasures(); noiseTimer = 40; playLevelUpSound(); updateUI(); updateBGM(); } else { state = "ending"; resetTimer = 0; rollY = 400; safeStopBGM(); playFomilyBell(true); } }
-        }
+        if (currentMap !== 1) { const config = levels[currentLevel-1]; if (Math.random() < 0.03 && enemies.length < config.enemyCount) { const type = config.enemyTypes[Math.floor(Math.random() * config.enemyTypes.length)]; enemies.push(new Nematode(Math.random()*400, -20, type)); } for(let i = enemies.length - 1; i >= 0; i--) { enemies[i].update(p.x, p.y); if (p.invul === 0 && Math.hypot(p.x - enemies[i].x, p.y - enemies[i].y) < 15) { p.hp--; p.invul = 60; playDamageNoise(); updateUI(); if (p.hp <= 0) { state = "dead"; resetTimer = 0; safeStopBGM(); return; } } }
+        } else if (p.hasT && Math.hypot(p.x - 200, p.y - 60) < 40) { p.saved++; p.hasT = false; playDepositSound(); updateUI(); if (p.saved >= 3) { if (currentLevel < 3) { currentLevel++; p.saved = 0; spawnTreasures(); noiseTimer = 40; playLevelUpSound(); updateUI(); updateBGM(); } else { state = "ending"; resetTimer = 0; rollY = 400; safeStopBGM(); playFomilyBell(true); } } }
         let t = treasures[currentMap]; if (t && t.active && !p.hasT && Math.hypot(p.x - t.x, p.y - t.y) < 25) { t.active = false; p.hasT = true; playGetSound(); }
         if (p.invul > 0) p.invul--; frame++;
     }
