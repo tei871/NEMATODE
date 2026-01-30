@@ -10,7 +10,6 @@
         canvas { border: 2px solid #222; image-rendering: pixelated; width: 100%; height: 100%; background: #000; display: block; }
         #ui { position: absolute; top: -45px; width: 100%; display: flex; justify-content: space-between; font-size: 14px; text-shadow: 2px 2px #000; pointer-events: none; }
         
-        /* 影のフィルター（ビネット）の修正：範囲を広げ、隅の途切れを解消 */
         .vignette { 
             position: absolute; 
             top: -2px; left: -2px; right: -2px; bottom: -2px; 
@@ -29,7 +28,6 @@
         .blink-off { opacity: 0.1; }
         #msg-layer { position: absolute; bottom: 80px; width: 100%; text-align: center; color: #fff; font-size: 14px; font-weight: bold; pointer-events: none; z-index: 150; text-shadow: 2px 2px #000; display: none; letter-spacing: 1px; }
 
-        /* バージョン表記のスタイル */
         #version-tag {
             position: absolute;
             bottom: 10px;
@@ -107,7 +105,7 @@
         if (audioCtx.state === 'suspended') audioCtx.resume();
         if(introBGM) return;
         const mainG = audioCtx.createGain(); mainG.gain.setValueAtTime(0, audioCtx.currentTime); mainG.gain.linearRampToValueAtTime(0.25, audioCtx.currentTime + 3); mainG.connect(audioCtx.destination);
-        const o = audioCtx.createOscillator(); const lfo = audioCtx.createOscillator(), lfoG = audioCtx.createGain(); o.type = 'sine'; o.frequency.value = 55; lfo.frequency.value = 0.15; lfoG.gain.value = 2; lfo.connect(lfoG); lfoG.connect(o.frequency); o.connect(mainG); o.start(); lfo.start();
+        const o = audioCtx.createOscillator(), lfo = audioCtx.createOscillator(), lfoG = audioCtx.createGain(); o.type = 'sine'; o.frequency.value = 55; lfo.frequency.value = 0.15; lfoG.gain.value = 2; lfo.connect(lfoG); lfoG.connect(o.frequency); o.connect(mainG); o.start(); lfo.start();
         const pianoInterval = setInterval(() => { if (state !== "intro") { clearInterval(pianoInterval); return; } playPianoNote(mainG); }, 2500);
         playPianoNote(mainG); introBGM = {o, mainG, lfo, interval: pianoInterval};
     }
@@ -124,7 +122,42 @@
     function skipIntro() { if (state !== "intro" || !audioStarted) return; state = "title"; stopIntroAudio(); document.getElementById('intro-screen').style.display = 'none'; document.getElementById('start-screen').style.display = 'block'; }
     function updateLogoBlink() { if (state !== "title") return; if (Math.random() < 0.02) { const chars = document.querySelectorAll('.logo-char'), target = chars[Math.floor(Math.random() * chars.length)]; target.classList.add('blink-off'); setTimeout(() => target.classList.remove('blink-off'), 50 + Math.random() * 100); } }
     function safeStopBGM() { if (bgmGain) { try { bgmGain.gain.cancelScheduledValues(0); bgmGain.gain.setTargetAtTime(0, audioCtx.currentTime, 0.03); } catch(e) {} } }
-    
+
+    // --- 足音の効果音生成 ---
+    function playFootstep(delay) {
+        const now = audioCtx.currentTime + delay;
+        const duration = 0.2;
+        
+        const osc = audioCtx.createOscillator();
+        const g = audioCtx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(60, now);
+        osc.frequency.exponentialRampToValueAtTime(30, now + duration);
+        g.gain.setValueAtTime(0.15, now);
+        g.gain.linearRampToValueAtTime(0, now + duration);
+        osc.connect(g); g.connect(audioCtx.destination);
+        
+        const bufferSize = audioCtx.sampleRate * duration;
+        const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+        
+        const noise = audioCtx.createBufferSource();
+        noise.buffer = buffer;
+        const noiseFilter = audioCtx.createBiquadFilter();
+        noiseFilter.type = 'lowpass';
+        noiseFilter.frequency.value = 400;
+        
+        const noiseGain = audioCtx.createGain();
+        noiseGain.gain.setValueAtTime(0.08, now);
+        noiseGain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+        
+        noise.connect(noiseFilter); noiseFilter.connect(noiseGain); noiseGain.connect(audioCtx.destination);
+        
+        osc.start(now); osc.stop(now + duration);
+        noise.start(now); noise.stop(now + duration);
+    }
+
     function initGameVars() { 
         p = { x: 200, y: 250, speed: 4, hp: 2, maxHp: 2, hasT: false, saved: 0, invul: 0 }; 
         currentMap = 0; currentLevel = 1; frame = 0; enemies = []; rollY = 420; resetTimer = 0; 
@@ -153,9 +186,9 @@
             const tx = touchX - rect.left;
             const ty = touchY - rect.top;
             
-            if (state !== "play") { 
+            if (state !== "play" && state !== "transitioning") { 
                 stick.tapped = true; 
-            } else if (tx < 200 && ty > 200) { 
+            } else if (state === "play" && tx < 200 && ty > 200) { 
                 stick.active = true; 
                 stick.startX = touchX; 
                 stick.startY = touchY; 
@@ -174,11 +207,31 @@
     
     window.onkeydown = e => { keys[e.code] = true; if (state === "intro") { handleIntroClick(); } else if (state === "title" && (e.code === "Enter" || e.code === "Space")) { startGame(); } }; window.onkeyup = e => keys[e.code] = false;
     
-    function startGame() { initAudio(); document.getElementById('start-screen').style.display = 'none'; initGameVars(); updateBGM(); if(!animationId) gameLoop(); }
+    // START INVESTIGATION クリック時の処理
+    function startGame() { 
+        initAudio(); 
+        document.getElementById('start-screen').style.display = 'none'; 
+        
+        state = "transitioning";
+        
+        // 1.0秒の中に収まるよう、足音の間隔を調整
+        playFootstep(0.1);
+        playFootstep(0.4);
+        playFootstep(0.7);
+
+        // 1.0秒後にゲーム開始
+        setTimeout(() => {
+            initGameVars(); 
+            updateBGM(); 
+            if(!animationId) gameLoop(); 
+        }, 1000);
+    }
+
     function updateUI() { document.getElementById('status-text').innerText = levels[currentLevel-1].name; document.getElementById('t-count').innerText = p.saved; document.getElementById('hearts').innerHTML = "■".repeat(Math.max(0, p.hp)); }
     
     function update() { 
         if (state === "intro") { introNematodes.forEach(n => { n.angle += 0.02; n.x += Math.cos(n.angle); n.y += Math.sin(n.angle); if(n.x < 0) n.x = 400; if(n.x > 400) n.x = 0; if(n.y < 0) n.y = 400; if(n.y > 400) n.y = 0; let head = {x: n.x, y: n.y}; for(let i=0; i<n.segs.length; i++) { let target = i===0 ? head : n.segs[i-1]; n.segs[i].x += (target.x - n.segs[i].x) * 0.2; n.segs[i].y += (target.y - n.segs[i].y) * 0.2; } }); return; } 
+        if (state === "transitioning") return;
         if (state !== "play") { 
             if (state === "title") updateLogoBlink(); 
             resetTimer++; 
@@ -232,7 +285,10 @@
     
     function draw() { 
         if (state === "intro") { ictx.clearRect(0,0,400,400); introNematodes.forEach(n => { n.segs.forEach((s, i) => { ictx.fillStyle = `rgba(100, 255, 100, ${0.5 - i*0.02})`; ictx.beginPath(); ictx.arc(s.x, s.y, 4 - i*0.2, 0, Math.PI*2); ictx.fill(); }); }); return; }
-        ctx.fillStyle = "#000"; ctx.fillRect(0,0,400,400); if (state === "title") return; ctx.fillStyle = levels[currentLevel-1].mapColor; ctx.fillRect(0,0,400,400);
+        ctx.fillStyle = "#000"; ctx.fillRect(0,0,400,400); 
+        if (state === "title" || state === "transitioning") return; 
+        
+        ctx.fillStyle = levels[currentLevel-1].mapColor; ctx.fillRect(0,0,400,400);
         if (currentMap === 0) { ctx.fillStyle = "#0070c0"; ctx.fillRect(120, 0, 160, 15); ctx.fillStyle = "#fff"; ctx.fillRect(120, 15, 160, 5); ctx.fillStyle = "#00a040"; ctx.fillRect(120, 20, 160, 5); }
         if (currentMap === 1) { 
             ctx.fillStyle = "#eee"; ctx.fillRect(50, 50, 300, 300); 
