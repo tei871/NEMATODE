@@ -123,11 +123,9 @@
     function updateLogoBlink() { if (state !== "title") return; if (Math.random() < 0.02) { const chars = document.querySelectorAll('.logo-char'), target = chars[Math.floor(Math.random() * chars.length)]; target.classList.add('blink-off'); setTimeout(() => target.classList.remove('blink-off'), 50 + Math.random() * 100); } }
     function safeStopBGM() { if (bgmGain) { try { bgmGain.gain.cancelScheduledValues(0); bgmGain.gain.setTargetAtTime(0, audioCtx.currentTime, 0.03); } catch(e) {} } }
 
-    // --- 足音の効果音生成 ---
     function playFootstep(delay) {
         const now = audioCtx.currentTime + delay;
         const duration = 0.2;
-        
         const osc = audioCtx.createOscillator();
         const g = audioCtx.createGain();
         osc.type = 'sine';
@@ -136,24 +134,19 @@
         g.gain.setValueAtTime(0.15, now);
         g.gain.linearRampToValueAtTime(0, now + duration);
         osc.connect(g); g.connect(audioCtx.destination);
-        
         const bufferSize = audioCtx.sampleRate * duration;
         const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
         const data = buffer.getChannelData(0);
         for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
-        
         const noise = audioCtx.createBufferSource();
         noise.buffer = buffer;
         const noiseFilter = audioCtx.createBiquadFilter();
         noiseFilter.type = 'lowpass';
         noiseFilter.frequency.value = 400;
-        
         const noiseGain = audioCtx.createGain();
         noiseGain.gain.setValueAtTime(0.08, now);
         noiseGain.gain.exponentialRampToValueAtTime(0.001, now + duration);
-        
         noise.connect(noiseFilter); noiseFilter.connect(noiseGain); noiseGain.connect(audioCtx.destination);
-        
         osc.start(now); osc.stop(now + duration);
         noise.start(now); noise.stop(now + duration);
     }
@@ -185,13 +178,11 @@
             const touchY = e.type === 'touchstart' ? e.touches[0].clientY : e.clientY;
             const tx = touchX - rect.left;
             const ty = touchY - rect.top;
-            
+            stick.tapped = false;
             if (state !== "play" && state !== "transitioning") { 
                 stick.tapped = true; 
             } else if (state === "play" && tx < 200 && ty > 200) { 
-                stick.active = true; 
-                stick.startX = touchX; 
-                stick.startY = touchY; 
+                stick.active = true; stick.startX = touchX; stick.startY = touchY; 
             } else { 
                 stick.tapped = true; 
             } 
@@ -204,27 +195,18 @@
     
     window.addEventListener('touchstart', handleGlobalInput, {passive: false}); window.addEventListener('touchmove', handleGlobalInput, {passive: false}); window.addEventListener('touchend', handleGlobalInput);
     window.addEventListener('mousedown', handleGlobalInput); window.addEventListener('mouseup', handleGlobalInput);
-    
     window.onkeydown = e => { keys[e.code] = true; if (state === "intro") { handleIntroClick(); } else if (state === "title" && (e.code === "Enter" || e.code === "Space")) { startGame(); } }; window.onkeyup = e => keys[e.code] = false;
     
-    // START INVESTIGATION クリック時の処理
     function startGame() { 
         initAudio(); 
         document.getElementById('start-screen').style.display = 'none'; 
-        
         state = "transitioning";
-        
-        // 1.0秒の中に収まるよう、足音の間隔を調整
-        playFootstep(0.1);
-        playFootstep(0.4);
-        playFootstep(0.7);
-
-        // 1.0秒後にゲーム開始
+        playFootstep(0.1); playFootstep(0.4); playFootstep(0.7);
         setTimeout(() => {
             initGameVars(); 
             updateBGM(); 
             if(!animationId) gameLoop(); 
-        }, 1000);
+        }, 1000); // 1.0秒に短縮
     }
 
     function updateUI() { document.getElementById('status-text').innerText = levels[currentLevel-1].name; document.getElementById('t-count').innerText = p.saved; document.getElementById('hearts').innerHTML = "■".repeat(Math.max(0, p.hp)); }
@@ -235,24 +217,33 @@
         if (state !== "play") { 
             if (state === "title") updateLogoBlink(); 
             resetTimer++; 
-            if (state === "ending") { 
-                if (resetTimer > 60 && (keys['Space'] || keys['Enter'] || stick.tapped)) { 
-                    isEndingTriggered = true; 
-                    stick.tapped = false;
-                }
-                if (isEndingTriggered) {
-                    whiteOutRadius += 8; 
-                    if (whiteOutRadius > 500) { 
-                        state = "title"; 
-                        document.getElementById('start-screen').style.display = 'block'; 
+            
+            // クールダウン時間を2秒(120フレーム)に変更
+            if (resetTimer > 120) { 
+                if (keys['Space'] || keys['Enter'] || stick.tapped) {
+                    if (state === "ending") {
+                        if (!isEndingTriggered) {
+                            isEndingTriggered = true;
+                            stick.tapped = false;
+                        }
+                    } else { 
+                        state = "title";
+                        stick.tapped = false;
+                        document.getElementById('start-screen').style.display = 'block';
                     }
                 }
-            } else if (resetTimer > 60 && (keys['Space'] || keys['Enter'] || stick.tapped)) { 
-                stick.tapped = false; state = "title"; 
-                document.getElementById('start-screen').style.display = 'block'; 
+            }
+            
+            if (state === "ending" && isEndingTriggered) {
+                whiteOutRadius += 8;
+                if (whiteOutRadius > 500) {
+                    state = "title";
+                    document.getElementById('start-screen').style.display = 'block';
+                }
             }
             return; 
         } 
+
         if (noiseTimer > 0) { noiseTimer--; return; }
         let mvX = 0, mvY = 0; if (keys['ArrowUp'] || keys['KeyW']) mvY -= 1; if (keys['ArrowDown'] || keys['KeyS']) mvY += 1; if (keys['ArrowLeft'] || keys['KeyA']) mvX -= 1; if (keys['ArrowRight'] || keys['KeyD']) mvX += 1; p.x += (mvX + stick.x) * p.speed; p.y += (mvY + stick.y) * p.speed;
         let oldMap = currentMap;
@@ -261,24 +252,10 @@
         else if (currentMap === 2) { if (p.x < 0) { currentMap = 0; p.x = 380; } else { p.x = Math.min(390, p.x); p.y = Math.max(10, Math.min(390, p.y)); } }
         else if (currentMap === 3) { if (p.x > 400) { currentMap = 0; p.x = 20; } else { p.x = Math.max(10, p.x); p.y = Math.max(10, Math.min(390, p.y)); } }
         else if (currentMap === 4) { if (p.y < 0) { currentMap = 0; p.y = 380; } else { p.y = Math.min(390, p.y); p.x = Math.max(10, Math.min(390, p.x)); } }
-        
-        if (oldMap !== currentMap) { 
-            msgLayer.style.display = 'none';
-            if (currentMap === 1) { p.hp = p.maxHp; playFomilyBell(false); } 
-            enemies = []; updateBGM(); updateUI(); 
-        }
-
-        if (currentMap === 1) {
-            if (Math.abs(p.x - (piledBooks.x + 11)) < 22 && Math.abs(p.y - (piledBooks.y + 9)) < 22) {
-                msgLayer.innerText = "えっちな本だ";
-                msgLayer.style.display = 'block';
-            } else {
-                msgLayer.style.display = 'none';
-            }
-        }
-
+        if (oldMap !== currentMap) { msgLayer.style.display = 'none'; if (currentMap === 1) { p.hp = p.maxHp; playFomilyBell(false); } enemies = []; updateBGM(); updateUI(); }
+        if (currentMap === 1) { if (Math.abs(p.x - (piledBooks.x + 11)) < 22 && Math.abs(p.y - (piledBooks.y + 9)) < 22) { msgLayer.innerText = "えっちな本だ"; msgLayer.style.display = 'block'; } else { msgLayer.style.display = 'none'; } }
         if (currentMap !== 1) { const config = levels[currentLevel-1]; if (Math.random() < 0.03 && enemies.length < config.enemyCount) { const type = config.enemyTypes[Math.floor(Math.random() * config.enemyTypes.length)]; enemies.push(new Nematode(Math.random()*400, -20, type)); } for(let i = enemies.length - 1; i >= 0; i--) { enemies[i].update(p.x, p.y); if (p.invul === 0 && Math.hypot(p.x - enemies[i].x, p.y - enemies[i].y) < 15) { p.hp--; p.invul = 60; playDamageNoise(); updateUI(); if (p.hp <= 0) { state = "dead"; resetTimer = 0; safeStopBGM(); return; } } }
-        } else if (p.hasT && Math.hypot(p.x - 200, p.y - 60) < 40) { p.saved++; p.hasT = false; playDepositSound(); updateUI(); if (p.saved >= 3) { if (currentLevel < 3) { currentLevel++; p.saved = 0; spawnTreasures(); noiseTimer = 40; playLevelUpSound(); updateUI(); updateBGM(); } else { state = "ending"; resetTimer = 0; rollY = 400; safeStopBGM(); playFomilyBell(true); isEndingTriggered = false; } } }
+        } else if (p.hasT && Math.hypot(p.x - 200, p.y - 60) < 40) { p.saved++; p.hasT = false; playDepositSound(); updateUI(); if (p.saved >= 3) { if (currentLevel < 3) { currentLevel++; p.saved = 0; spawnTreasures(); noiseTimer = 40; playLevelUpSound(); updateUI(); updateBGM(); } else { state = "ending"; resetTimer = 0; rollY = 400; safeStopBGM(); playFomilyBell(true); isEndingTriggered = false; stick.tapped = false; } } }
         let t = treasures[currentMap]; if (t && t.active && !p.hasT && Math.hypot(p.x - t.x, p.y - t.y) < 25) { t.active = false; p.hasT = true; playGetSound(); }
         if (p.invul > 0) p.invul--; frame++;
     }
@@ -287,41 +264,22 @@
         if (state === "intro") { ictx.clearRect(0,0,400,400); introNematodes.forEach(n => { n.segs.forEach((s, i) => { ictx.fillStyle = `rgba(100, 255, 100, ${0.5 - i*0.02})`; ictx.beginPath(); ictx.arc(s.x, s.y, 4 - i*0.2, 0, Math.PI*2); ictx.fill(); }); }); return; }
         ctx.fillStyle = "#000"; ctx.fillRect(0,0,400,400); 
         if (state === "title" || state === "transitioning") return; 
-        
         ctx.fillStyle = levels[currentLevel-1].mapColor; ctx.fillRect(0,0,400,400);
         if (currentMap === 0) { ctx.fillStyle = "#0070c0"; ctx.fillRect(120, 0, 160, 15); ctx.fillStyle = "#fff"; ctx.fillRect(120, 15, 160, 5); ctx.fillStyle = "#00a040"; ctx.fillRect(120, 20, 160, 5); }
         if (currentMap === 1) { 
-            ctx.fillStyle = "#eee"; ctx.fillRect(50, 50, 300, 300); 
-            ctx.fillStyle = "#00a040"; ctx.fillRect(170, 40, 60, 40); 
-            
-            const bx = piledBooks.x, by = piledBooks.y;
-            ctx.fillStyle = "rgba(0,0,0,0.15)";
-            ctx.fillRect(bx+2, by+12, 20, 6);
-            
-            ctx.fillStyle = "#556b2f"; 
-            ctx.fillRect(bx+2, by+8, 16, 6);
-            ctx.fillStyle = "#e5e5d1"; 
-            ctx.fillRect(bx+16, by+9, 2, 4);
-
-            ctx.fillStyle = "#4682b4"; 
-            ctx.fillRect(bx+1, by+4, 16, 6);
-            ctx.fillStyle = "#f5f5dc"; 
-            ctx.fillRect(bx+15, by+5, 2, 4);
-
-            ctx.fillStyle = "#2f4f4f"; 
-            ctx.fillRect(bx-2, by, 16, 6);
-            ctx.fillStyle = "#fff"; 
-            ctx.fillRect(bx+12, by+1, 2, 4);
-            ctx.fillStyle = "#8b4513";
-            ctx.fillRect(bx-2, by, 3, 6);
+            ctx.fillStyle = "#eee"; ctx.fillRect(50, 50, 300, 300); ctx.fillStyle = "#00a040"; ctx.fillRect(170, 40, 60, 40); 
+            const bx = piledBooks.x, by = piledBooks.y; ctx.fillStyle = "rgba(0,0,0,0.15)"; ctx.fillRect(bx+2, by+12, 20, 6);
+            ctx.fillStyle = "#556b2f"; ctx.fillRect(bx+2, by+8, 16, 6); ctx.fillStyle = "#e5e5d1"; ctx.fillRect(bx+16, by+9, 2, 4);
+            ctx.fillStyle = "#4682b4"; ctx.fillRect(bx+1, by+4, 16, 6); ctx.fillStyle = "#f5f5dc"; ctx.fillRect(bx+15, by+5, 2, 4);
+            ctx.fillStyle = "#2f4f4f"; ctx.fillRect(bx-2, by, 16, 6); ctx.fillStyle = "#fff"; ctx.fillRect(bx+12, by+1, 2, 4);
+            ctx.fillStyle = "#8b4513"; ctx.fillRect(bx-2, by, 3, 6);
         }
         let t = treasures[currentMap]; if (t && t.active) { ctx.fillStyle = "#0ff"; ctx.beginPath(); ctx.arc(t.x, t.y, 8, 0, Math.PI*2); ctx.fill(); }
         if (state === "play") { enemies.forEach(en => en.draw()); ctx.fillStyle = p.invul % 10 < 5 ? (p.hasT ? "#0ff" : "#0f0") : "#f00"; ctx.fillRect(p.x-5, p.y-5, 10, 10); if (p.hasT) { ctx.strokeStyle = "#0ff"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(p.x, p.y, 15 + Math.sin(frame/5)*3, 0, Math.PI*2); ctx.stroke(); } }
         if (state === "dead") { ctx.fillStyle = "rgba(0,0,0,0.85)"; ctx.fillRect(0,0,400,400); ctx.fillStyle = "#f00"; ctx.textAlign = "center"; ctx.font = "18px monospace"; ctx.fillText("ERROR: SUBJECT DECEASED", 200, 180); if(resetTimer > 60) { ctx.font = "12px monospace"; ctx.fillText("TAP TO RETURN TO TITLE", 200, 230); } }
         else if (state === "ending") { 
             ctx.fillStyle = "rgba(0,0,0,0.9)"; ctx.fillRect(0,0,400,400); ctx.fillStyle = "#fff"; ctx.textAlign = "center"; ctx.font = "20px serif"; ctx.fillText("PURIFICATION COMPLETE", 200, rollY); ctx.font = "14px serif"; ctx.fillText("THE WORLD IS RESTORED", 200, rollY + 60); 
-            if (rollY > 150) rollY -= 0.7; 
-            if (resetTimer > 60 && !isEndingTriggered) { ctx.font = "10px monospace"; ctx.fillStyle = "#888"; ctx.fillText("TAP TO FINALIZE PURIFICATION", 200, 350); }
+            if (rollY > 150) rollY -= 0.7; if (resetTimer > 120 && !isEndingTriggered) { ctx.font = "10px monospace"; ctx.fillStyle = "#888"; ctx.fillText("TAP TO FINALIZE PURIFICATION", 200, 350); }
             if (whiteOutRadius > 0) { ctx.fillStyle = "white"; ctx.beginPath(); ctx.arc(200, 200, whiteOutRadius, 0, Math.PI*2); ctx.fill(); }
         }
         if (noiseTimer > 0) { ctx.fillStyle = `rgba(255,255,255,${Math.random()*0.2})`; ctx.fillRect(0, Math.random()*400, 400, 15); }
